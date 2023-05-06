@@ -3,7 +3,6 @@ use std::error::Error;
 use async_std::{fs::File, io::BufReader, prelude::*};
 
 fn main() {
-    println!("running");
     run_example_1().unwrap();
 }
 
@@ -46,7 +45,7 @@ fn run_example_1() -> Result<(), Box<dyn Error>> {
 async fn run_test() -> Result<(), Box<dyn Error>> {
     let source = File::open("./data/1").await?;
     let outbound = Box::new(PrintOutbound::new());
-    async_std::task::block_on(run(source, outbound))?;
+    run(source, outbound).await?;
 
     Ok(())
 }
