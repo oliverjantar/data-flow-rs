@@ -2,11 +2,12 @@ use std::error::Error;
 
 use async_std::io::prelude::*;
 
+use anyhow::anyhow;
 use async_std::{io::BufReader, prelude::*};
 use tokio::sync::broadcast;
 
 trait Outbound<T> {
-    fn send(&self, packet: T);
+    fn send(&self, packet: T) -> anyhow::Result<()>;
 }
 
 struct DataModuleSender<T> {
@@ -25,10 +26,11 @@ where
 }
 
 impl<T> Outbound<T> for DataModuleSender<T> {
-    fn send(&self, packet: T) {
-        if self.sender.send(packet).is_err() {
-            eprintln!("Couldn't send packet to sender.");
-        }
+    fn send(&self, packet: T) -> anyhow::Result<()> {
+        self.sender
+            .send(packet)
+            .map(|_| ())
+            .map_err(|err| anyhow!("Error while sending packet to sender: {}", err))
     }
 }
 
@@ -38,9 +40,8 @@ where
 {
     let mut lines = BufReader::new(source).lines();
 
-    while let Some(line) = lines.next().await {
-        // let line = line?;
-        outbound.send(line?)
+    while let Some(result) = lines.next().await {
+        outbound.send(result?)?
     }
 
     Ok(())
