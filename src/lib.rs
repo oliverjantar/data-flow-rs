@@ -29,14 +29,15 @@ impl<T> Outbound<T> for DataModuleSender<T> {
     fn send(&self, packet: T) -> anyhow::Result<()> {
         self.sender
             .send(packet)
-            .map(|_| ())
-            .map_err(|err| anyhow!("Error while sending packet to sender: {}", err))
+            .map_err(|err| anyhow!("Error while sending packet to sender: {}", err))?;
+        Ok(())
     }
 }
 
-async fn run<T>(source: T, outbound: Box<dyn Outbound<String>>) -> Result<(), Box<dyn Error>>
+async fn run<T, S>(source: T, outbound: S) -> Result<(), Box<dyn Error>>
 where
     T: Unpin + Sized + async_std::io::Read,
+    S: Outbound<String>,
 {
     let mut lines = BufReader::new(source).lines();
 
@@ -55,11 +56,11 @@ mod tests {
     use async_std::task;
 
     #[test]
-    fn test_simple_receiver() -> Result<(), Box<dyn Error>> {
-        async_std::task::block_on(run_test_2())
+    fn test_simple_receiver() {
+        assert!(async_std::task::block_on(run_test_stream_data()).is_ok());
     }
 
-    async fn run_test_2() -> Result<(), Box<dyn Error>> {
+    async fn run_test_stream_data() -> Result<(), Box<dyn Error>> {
         let source = File::open("./data/1").await?;
         let sender = DataModuleSender::<String>::new();
 
@@ -74,8 +75,45 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        run(source, Box::new(sender)).await?;
+        run(source, sender).await?;
         handle.await;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multiple_receivers() {
+        assert!(async_std::task::block_on(run_multiple_receivers()).is_ok());
+    }
+
+    async fn run_multiple_receivers() -> Result<(), Box<dyn Error>> {
+        let source = File::open("./data/1").await?;
+        let sender = DataModuleSender::<String>::new();
+
+        let mut receiver1 = sender.sender.subscribe();
+        let mut receiver2 = sender.sender.subscribe();
+
+        let handle1 = task::spawn_local(async move {
+            let mut values = vec![];
+            while let Ok(value) = receiver1.recv().await {
+                values.push(value);
+            }
+
+            assert_eq!(values, vec!["this", "is", "a", "test"]);
+        });
+
+        let handle2 = task::spawn_local(async move {
+            let mut values = vec![];
+            while let Ok(value) = receiver2.recv().await {
+                values.push(value);
+            }
+
+            assert_eq!(values, vec!["this", "is", "a", "test"]);
+        });
+
+        run(source, sender).await?;
+        handle1.await;
+        handle2.await;
 
         Ok(())
     }
