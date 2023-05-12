@@ -1,20 +1,17 @@
-use std::error::Error;
-
-use async_std::io::prelude::*;
-
 use anyhow::anyhow;
-use async_std::{io::BufReader, prelude::*};
+use async_std::prelude::*;
+use std::error::Error;
 use tokio::sync::broadcast;
 
 trait Outbound<T> {
     fn send(&self, packet: T) -> anyhow::Result<()>;
 }
 
-struct DataModuleSender<T> {
+struct BroadcastSender<T> {
     sender: broadcast::Sender<T>,
 }
 
-impl<T> DataModuleSender<T>
+impl<T> BroadcastSender<T>
 where
     T: Clone,
 {
@@ -25,7 +22,7 @@ where
     }
 }
 
-impl<T> Outbound<T> for DataModuleSender<T> {
+impl<T> Outbound<T> for BroadcastSender<T> {
     fn send(&self, packet: T) -> anyhow::Result<()> {
         self.sender
             .send(packet)
@@ -34,15 +31,13 @@ impl<T> Outbound<T> for DataModuleSender<T> {
     }
 }
 
-async fn run<T, S>(source: T, outbound: S) -> Result<(), Box<dyn Error>>
+async fn run<T, S, U>(mut source: T, outbound: S) -> Result<(), Box<dyn Error>>
 where
-    T: Unpin + Sized + async_std::io::Read,
-    S: Outbound<String>,
+    T: Stream<Item = Result<U, std::io::Error>> + Unpin,
+    S: Outbound<U>,
 {
-    let mut lines = BufReader::new(source).lines();
-
-    while let Some(result) = lines.next().await {
-        outbound.send(result?)?
+    while let Some(result) = source.next().await {
+        outbound.send(result?)?;
     }
 
     Ok(())
@@ -53,6 +48,7 @@ mod tests {
 
     use super::*;
     use async_std::fs::File;
+    use async_std::io::BufReader;
     use async_std::task;
 
     #[test]
@@ -62,7 +58,9 @@ mod tests {
 
     async fn run_test_stream_data() -> Result<(), Box<dyn Error>> {
         let source = File::open("./data/1").await?;
-        let sender = DataModuleSender::<String>::new();
+        let lines = BufReader::new(source).lines();
+
+        let sender = BroadcastSender::<String>::new();
 
         let mut receiver = sender.sender.subscribe();
 
@@ -75,7 +73,7 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        run(source, sender).await?;
+        run(lines, sender).await?;
         handle.await;
 
         Ok(())
@@ -88,7 +86,8 @@ mod tests {
 
     async fn run_multiple_receivers() -> Result<(), Box<dyn Error>> {
         let source = File::open("./data/1").await?;
-        let sender = DataModuleSender::<String>::new();
+        let sender = BroadcastSender::<String>::new();
+        let lines = BufReader::new(source).lines();
 
         let mut receiver1 = sender.sender.subscribe();
         let mut receiver2 = sender.sender.subscribe();
@@ -111,7 +110,7 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        run(source, sender).await?;
+        run(lines, sender).await?;
         handle1.await;
         handle2.await;
 
