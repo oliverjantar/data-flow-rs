@@ -3,6 +3,9 @@ use async_std::prelude::*;
 use std::error::Error;
 use tokio::sync::broadcast;
 
+#[cfg(test)]
+use mockall::{automock, mock, predicate::*};
+#[cfg_attr(test, automock)]
 trait Outbound<T> {
     fn send(&self, packet: T) -> anyhow::Result<()>;
 }
@@ -49,7 +52,9 @@ mod tests {
     use super::*;
     use async_std::fs::File;
     use async_std::io::BufReader;
+    use async_std::stream::StreamExt;
     use async_std::task;
+    use mockall::mock;
 
     #[test]
     fn test_simple_receiver() {
@@ -115,5 +120,19 @@ mod tests {
         handle2.await;
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn run_with_mock_sender() {
+        let mut source = futures::stream::iter(vec![Ok(1), Ok(2), Ok(1)]);
+
+        let mut outbound = MockOutbound::new();
+        outbound.expect_send().times(3).returning(|value| {
+            assert!(matches!(value, 1 | 2 | 3));
+            Ok(())
+        });
+
+        let result = run(&mut source, outbound).await;
+        assert!(result.is_ok());
     }
 }
