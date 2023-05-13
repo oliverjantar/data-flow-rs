@@ -22,27 +22,49 @@ where
     Ok(())
 }
 
-struct BroadcastSender<T> {
+struct DataSender<T> {
     sender: broadcast::Sender<T>,
 }
 
-impl<T> BroadcastSender<T>
+impl<T> DataSender<T>
 where
     T: Clone,
 {
-    fn new() -> Self {
-        let (sender, _recv) = broadcast::channel(100);
+    fn new(capacity: usize) -> Self {
+        let (sender, _recv) = broadcast::channel(capacity);
 
         Self { sender }
     }
 }
 
-impl<T> Outbound<T> for BroadcastSender<T> {
+impl<T> Outbound<T> for DataSender<T> {
     fn send(&self, packet: T) -> anyhow::Result<()> {
         self.sender
             .send(packet)
             .map_err(|err| anyhow!("Error while sending packet to sender: {}", err))?;
         Ok(())
+    }
+}
+
+trait ProcessingModule<T> {}
+
+struct DataReceiver<T, U>
+where
+    U: ProcessingModule<T>,
+{
+    receiver: broadcast::Receiver<T>,
+    processing_module: U,
+}
+
+impl<T, U> DataReceiver<T, U>
+where
+    U: ProcessingModule<T>,
+{
+    fn new(receiver: broadcast::Receiver<T>, processing_module: U) -> Self {
+        Self {
+            receiver,
+            processing_module,
+        }
     }
 }
 
@@ -63,7 +85,7 @@ mod tests {
         let source = File::open("./data/1").await?;
         let lines = BufReader::new(source).lines();
 
-        let sender = BroadcastSender::<String>::new();
+        let sender = DataSender::<String>::new(100);
 
         let mut receiver = sender.sender.subscribe();
 
@@ -89,7 +111,7 @@ mod tests {
 
     async fn run_multiple_receivers() -> Result<(), Box<dyn Error>> {
         let source = File::open("./data/1").await?;
-        let sender = BroadcastSender::<String>::new();
+        let sender = DataSender::<String>::new(100);
         let lines = BufReader::new(source).lines();
 
         let mut receiver1 = sender.sender.subscribe();
