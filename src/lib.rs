@@ -4,10 +4,22 @@ use std::error::Error;
 use tokio::sync::broadcast;
 
 #[cfg(test)]
-use mockall::{automock, mock, predicate::*};
+use mockall::{automock, predicate::*};
 #[cfg_attr(test, automock)]
 trait Outbound<T> {
     fn send(&self, packet: T) -> anyhow::Result<()>;
+}
+
+async fn pipe<T, S, U>(mut source: T, outbound: S) -> Result<(), Box<dyn Error>>
+where
+    T: Stream<Item = Result<U, std::io::Error>> + Unpin,
+    S: Outbound<U>,
+{
+    while let Some(result) = source.next().await {
+        outbound.send(result?)?;
+    }
+
+    Ok(())
 }
 
 struct BroadcastSender<T> {
@@ -34,27 +46,13 @@ impl<T> Outbound<T> for BroadcastSender<T> {
     }
 }
 
-async fn run<T, S, U>(mut source: T, outbound: S) -> Result<(), Box<dyn Error>>
-where
-    T: Stream<Item = Result<U, std::io::Error>> + Unpin,
-    S: Outbound<U>,
-{
-    while let Some(result) = source.next().await {
-        outbound.send(result?)?;
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
 
     use super::*;
     use async_std::fs::File;
     use async_std::io::BufReader;
-    use async_std::stream::StreamExt;
     use async_std::task;
-    use mockall::mock;
 
     #[test]
     fn test_simple_receiver() {
@@ -78,7 +76,7 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        run(lines, sender).await?;
+        pipe(lines, sender).await?;
         handle.await;
 
         Ok(())
@@ -115,7 +113,7 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        run(lines, sender).await?;
+        pipe(lines, sender).await?;
         handle1.await;
         handle2.await;
 
@@ -132,7 +130,7 @@ mod tests {
             Ok(())
         });
 
-        let result = run(&mut source, outbound).await;
+        let result = pipe(&mut source, outbound).await;
         assert!(result.is_ok());
     }
 }
