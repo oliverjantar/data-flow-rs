@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use async_std::prelude::*;
+use async_std::{prelude::*, task::JoinHandle};
 use std::error::Error;
 use tokio::sync::broadcast;
 
@@ -46,10 +46,13 @@ impl<T> Outbound<T> for DataSender<T> {
     }
 }
 
-trait ProcessingModule<T> {}
+trait ProcessingModule<T> {
+    fn process(&self, value: T) -> anyhow::Result<()>;
+}
 
 struct DataReceiver<T, U>
 where
+    T: Clone,
     U: ProcessingModule<T>,
 {
     receiver: broadcast::Receiver<T>,
@@ -58,6 +61,7 @@ where
 
 impl<T, U> DataReceiver<T, U>
 where
+    T: Clone,
     U: ProcessingModule<T>,
 {
     fn new(receiver: broadcast::Receiver<T>, processing_module: U) -> Self {
@@ -65,6 +69,13 @@ where
             receiver,
             processing_module,
         }
+    }
+
+    async fn start_receiving(&mut self) -> anyhow::Result<()> {
+        while let Ok(value) = self.receiver.recv().await {
+            self.processing_module.process(value)?
+        }
+        Ok(())
     }
 }
 
