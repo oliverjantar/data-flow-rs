@@ -1,7 +1,10 @@
-use anyhow::anyhow;
-use async_std::{prelude::*, task::JoinHandle};
+#![feature(async_fn_in_trait)]
+
+use anyhow::{anyhow, Result};
+use futures_lite::Stream;
 use std::error::Error;
 use tokio::sync::broadcast;
+use tokio_stream::{wrappers::BroadcastStream, StreamExt};
 
 #[cfg(test)]
 use mockall::{automock, predicate::*};
@@ -47,7 +50,17 @@ impl<T> Outbound<T> for DataSender<T> {
 }
 
 trait ProcessingModule<T> {
-    fn process(&self, value: T) -> anyhow::Result<()>;
+    async fn process(&self, value: T) -> anyhow::Result<()>;
+}
+
+struct FilterMapProcessingModule {
+    // filters:
+}
+
+impl<T> ProcessingModule<T> for FilterMapProcessingModule {
+    async fn process(&self, value: T) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 struct DataReceiver<T, U>
@@ -56,12 +69,16 @@ where
     U: ProcessingModule<T>,
 {
     receiver: broadcast::Receiver<T>,
+    //I have decided to have here only one processing module for now and to scale the processing of different modules by creating multiple subscribers.
+    //With this approach it won't call dynamic dispatch because every processing module is known at compile time.
+    //It would be good to create a different data receiver with a simple receiver (not broadcast) and to have multiple processing modules in it.
+    //Then start receiving would spawn multiple tasks for every processing module. This approach will use the dynamic dispatch as there would be different implementations of processing modules
     processing_module: U,
 }
 
 impl<T, U> DataReceiver<T, U>
 where
-    T: Clone,
+    T: Clone + Send,
     U: ProcessingModule<T>,
 {
     fn new(receiver: broadcast::Receiver<T>, processing_module: U) -> Self {
@@ -71,9 +88,15 @@ where
         }
     }
 
+    // async fn receiver_to_stream(&self) -> impl Stream<Item = T> {
+    //     let stream = BroadcastStream::new(self.receiver);
+    //     stream
+    //     //stream.filter_map(|result| async { result.ok() })
+    // }
+
     async fn start_receiving(&mut self) -> anyhow::Result<()> {
         while let Ok(value) = self.receiver.recv().await {
-            self.processing_module.process(value)?
+            self.processing_module.process(value).await?
         }
         Ok(())
     }
@@ -83,24 +106,22 @@ where
 mod tests {
 
     use super::*;
-    use async_std::fs::File;
-    use async_std::io::BufReader;
-    use async_std::task;
+    use tokio::task;
 
-    #[test]
-    fn test_simple_receiver() {
-        assert!(async_std::task::block_on(run_test_stream_data()).is_ok());
-    }
-
+    #[tokio::test]
     async fn run_test_stream_data() -> Result<(), Box<dyn Error>> {
-        let source = File::open("./data/1").await?;
-        let lines = BufReader::new(source).lines();
+        let stream = futures::stream::iter([
+            Ok("this".to_owned()),
+            Ok("is".to_owned()),
+            Ok("a".to_owned()),
+            Ok("test".to_owned()),
+        ]);
 
         let sender = DataSender::<String>::new(100);
 
         let mut receiver = sender.sender.subscribe();
 
-        let handle = task::spawn_local(async move {
+        let handle = task::spawn(async move {
             let mut values = vec![];
             while let Ok(value) = receiver.recv().await {
                 values.push(value);
@@ -109,26 +130,27 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        pipe(lines, sender).await?;
-        handle.await;
+        pipe(stream, sender).await?;
+        handle.await?;
 
         Ok(())
     }
 
-    #[test]
-    fn test_multiple_receivers() {
-        assert!(async_std::task::block_on(run_multiple_receivers()).is_ok());
-    }
-
+    #[tokio::test]
     async fn run_multiple_receivers() -> Result<(), Box<dyn Error>> {
-        let source = File::open("./data/1").await?;
+        let mut stream = futures::stream::iter(vec![
+            Ok("this".to_owned()),
+            Ok("is".to_owned()),
+            Ok("a".to_owned()),
+            Ok("test".to_owned()),
+        ]);
+
         let sender = DataSender::<String>::new(100);
-        let lines = BufReader::new(source).lines();
 
         let mut receiver1 = sender.sender.subscribe();
         let mut receiver2 = sender.sender.subscribe();
 
-        let handle1 = task::spawn_local(async move {
+        let handle1 = task::spawn(async move {
             let mut values = vec![];
             while let Ok(value) = receiver1.recv().await {
                 values.push(value);
@@ -137,7 +159,7 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        let handle2 = task::spawn_local(async move {
+        let handle2 = task::spawn(async move {
             let mut values = vec![];
             while let Ok(value) = receiver2.recv().await {
                 values.push(value);
@@ -146,16 +168,16 @@ mod tests {
             assert_eq!(values, vec!["this", "is", "a", "test"]);
         });
 
-        pipe(lines, sender).await?;
-        handle1.await;
-        handle2.await;
+        pipe(stream, sender).await?;
+        handle1.await?;
+        handle2.await?;
 
         Ok(())
     }
 
     #[tokio::test]
     async fn run_with_mock_sender() {
-        let mut source = futures::stream::iter(vec![Ok(1), Ok(2), Ok(1)]);
+        let source = futures::stream::iter(vec![Ok(1), Ok(2), Ok(1)]);
 
         let mut outbound = MockOutbound::new();
         outbound.expect_send().times(3).returning(|value| {
@@ -163,7 +185,7 @@ mod tests {
             Ok(())
         });
 
-        let result = pipe(&mut source, outbound).await;
+        let result = pipe(source, outbound).await;
         assert!(result.is_ok());
     }
 }

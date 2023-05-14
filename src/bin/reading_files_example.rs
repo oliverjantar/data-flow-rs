@@ -37,3 +37,37 @@ fn main() -> io::Result<()> {
 
     Ok(())
 }
+
+/*
+
+use anyhow::{Context, Result};
+use async_std::{
+    fs,
+    path::{Path, PathBuf},
+};
+use futures::stream::{Stream, StreamExt};
+use std::ffi::OsStr;
+
+async fn read_dir_filtered<P: AsRef<Path>>(
+    ending: &'static str,
+    path: P,
+) -> Result<std::pin::Pin<Box<dyn Stream<Item = PathBuf>>>> {
+    let dir_stream = fs::read_dir(&path)
+        .await
+        .with_context(|| format!("failed to read: {:?}", path.as_ref()))?;
+    Ok(Box::pin(dir_stream.filter_map(move |d| async move {
+        match d {
+            Ok(rr) if path_has_ending(rr.path(), ending) => Some(rr.path().to_path_buf()),
+            Ok(_) | Err(_) => None,
+        }
+    })))
+}
+
+fn path_has_ending(p: impl AsRef<Path>, ending: &str) -> bool {
+    match p.as_ref().extension().and_then(OsStr::to_str) {
+        Some(ext) => ending == ext,
+        _ => false,
+    }
+}
+
+*/
