@@ -1,10 +1,12 @@
 #![feature(async_fn_in_trait)]
+#![feature(return_position_impl_trait_in_trait)]
 
 use anyhow::{anyhow, Result};
+use core::fmt::Debug;
 use futures_lite::Stream;
 use std::error::Error;
 use tokio::sync::broadcast;
-use tokio_stream::{wrappers::BroadcastStream, StreamExt};
+use tokio_stream::StreamExt;
 
 #[cfg(test)]
 use mockall::{automock, predicate::*};
@@ -49,20 +51,6 @@ impl<T> Outbound<T> for DataSender<T> {
     }
 }
 
-trait ProcessingModule<T> {
-    async fn process(&self, value: T) -> anyhow::Result<()>;
-}
-
-struct FilterMapProcessingModule {
-    // filters:
-}
-
-impl<T> ProcessingModule<T> for FilterMapProcessingModule {
-    async fn process(&self, value: T) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
-
 struct DataReceiver<T, U>
 where
     T: Clone,
@@ -78,7 +66,7 @@ where
 
 impl<T, U> DataReceiver<T, U>
 where
-    T: Clone + Send,
+    T: Clone + Send + 'static,
     U: ProcessingModule<T>,
 {
     fn new(receiver: broadcast::Receiver<T>, processing_module: U) -> Self {
@@ -90,8 +78,12 @@ where
 
     // async fn receiver_to_stream(&self) -> impl Stream<Item = T> {
     //     let stream = BroadcastStream::new(self.receiver);
-    //     stream
-    //     //stream.filter_map(|result| async { result.ok() })
+
+    // stream.filter_map(|result| {
+    //     if let Ok(value) = result {
+    //         async move { self.processing_module.process(value) }
+    //     }
+    // })
     // }
 
     async fn start_receiving(&mut self) -> anyhow::Result<()> {
@@ -102,8 +94,65 @@ where
     }
 }
 
+trait ProcessingModule<T> {
+    async fn process(&self, value: T) -> anyhow::Result<()>;
+
+    //  async fn process_stream(&self, stream: impl Stream<Item = T> + Unpin) -> impl Stream<Item = T>;
+}
+
+struct FilterMapProcessingModule<T> {
+    filters: Vec<Box<dyn Fn(&T) -> bool + Send + Sync>>,
+    maps: Vec<Box<dyn Fn(&mut T) + Send + Sync>>,
+}
+
+impl<T> FilterMapProcessingModule<T> {
+    fn new(
+        filters: Vec<Box<dyn Fn(&T) -> bool + Send + Sync>>,
+        maps: Vec<Box<dyn Fn(&mut T) + Send + Sync>>,
+    ) -> Self {
+        Self { filters, maps }
+    }
+}
+
+impl<T> ProcessingModule<T> for FilterMapProcessingModule<T>
+where
+    T: Debug,
+{
+    async fn process(&self, mut value: T) -> anyhow::Result<()> {
+        for func in self.filters.iter() {
+            if !func(&value) {
+                return Ok(());
+            }
+        }
+
+        for func in self.maps.iter() {
+            func(&mut value);
+        }
+
+        println!("value {:?}:", value);
+
+        Ok(())
+    }
+
+    // async fn process_stream(
+    //     &self,
+    //     mut stream: impl Stream<Item = T> + Unpin,
+    // ) -> impl Stream<Item = T> {
+    //     let maps_clone = self.maps.clone();
+    //     Box::pin(stream.filter_map(move |item| {
+    //         let mut current_item = Some(item);
+    //         for map in &maps_clone {
+    //             current_item = map(current_item?);
+    //         }
+    //         futures::future::ready(current_item)
+    //     }))
+    // }
+}
+
 #[cfg(test)]
 mod tests {
+
+    use std::vec;
 
     use super::*;
     use tokio::task;
@@ -187,5 +236,36 @@ mod tests {
 
         let result = pipe(source, outbound).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_filter_map_processing() -> Result<(), Box<dyn Error>> {
+        let stream = futures::stream::iter([
+            Ok("this".to_owned()),
+            Ok("is".to_owned()),
+            Ok("a".to_owned()),
+            Ok("test".to_owned()),
+        ]);
+
+        let sender = DataSender::<String>::new(100);
+
+        let filter: Box<dyn Fn(&String) -> bool + Send + Sync> = Box::new(|value| value != "test");
+        let map: Box<dyn Fn(&mut String) + Send + Sync> = Box::new(|_| {});
+
+        let filters = vec![filter];
+        let maps = vec![map];
+
+        let processing_module = FilterMapProcessingModule::<String>::new(filters, maps);
+
+        let receiver = sender.sender.subscribe();
+
+        let mut data_processing = DataReceiver::new(receiver, processing_module);
+
+        let handle = task::spawn(async move { data_processing.start_receiving().await });
+
+        pipe(stream, sender).await?;
+        handle.await??;
+
+        Ok(())
     }
 }
