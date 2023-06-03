@@ -4,7 +4,8 @@
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures_lite::Stream;
-use std::error::Error;
+use std::future::Future;
+use std::{error::Error, pin::Pin};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 
@@ -149,6 +150,37 @@ where
     // }
 }
 
+/*
+
+//Don't know how to store list of futures and then execute them in loop.. need to figure it out
+struct ProcessingModuleAsync<T> {
+    futures: Vec<Pin<Box<dyn Future<Output = T>>>>,
+    // _marker: PhantomData<T>,
+}
+
+impl<T> ProcessingModuleAsync<T> {
+    fn new(futures: Vec<Pin<Box<dyn Future<Output = T>>>>) -> Self {
+        ProcessingModuleAsync { futures }
+    }
+}
+
+impl<T> ProcessingModule<T> for ProcessingModuleAsync<T>
+where
+    T: Debug,
+{
+    async fn process(&self, value: T) -> anyhow::Result<()> {
+        let x = simple_delay::<T>;
+        // for future in &self.futures {
+        //     future().await;
+        //     let result = x(&value).await;
+        //     result?
+        // }
+
+        Ok(())
+    }
+}
+*/
+
 #[cfg(test)]
 mod tests {
 
@@ -156,6 +188,7 @@ mod tests {
 
     use super::*;
     use tokio::task;
+    use tokio::time::{sleep, Duration};
 
     #[tokio::test]
     async fn run_test_stream_data() -> Result<(), Box<dyn Error>> {
@@ -265,6 +298,92 @@ mod tests {
 
         pipe(stream, sender).await?;
         handle.await??;
+
+        Ok(())
+    }
+
+    struct StringProcessingModule {
+        delay: u64,
+        name: String,
+    }
+
+    impl StringProcessingModule {
+        fn new(delay: u64, name: &str) -> Self {
+            StringProcessingModule {
+                delay,
+                name: name.to_owned(),
+            }
+        }
+    }
+
+    impl ProcessingModule<String> for StringProcessingModule {
+        async fn process(&self, value: String) -> anyhow::Result<()> {
+            println!(
+                "{}: going to sleep for {}ms, value: {}",
+                self.name, self.delay, value
+            );
+            sleep(Duration::from_millis(self.delay)).await;
+
+            println!(
+                "{}: awaking from sleep {}ms, value: {}",
+                self.name, self.delay, value
+            );
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_multiple_processing_modules() -> Result<(), Box<dyn Error>> {
+        let stream = futures::stream::iter([
+            Ok("1".to_owned()),
+            Ok("2".to_owned()),
+            Ok("3".to_owned()),
+            Ok("4".to_owned()),
+            Ok("5".to_owned()),
+        ]);
+
+        let sender = DataSender::<String>::new(100);
+
+        // 1. module processor - without any delays
+        let filter: Box<dyn Fn(&String) -> bool + Send + Sync> = Box::new(|value| {
+            println!("filtering value: {}", value);
+            return value == "test";
+        });
+        let map: Box<dyn Fn(&mut String) + Send + Sync> = Box::new(|_| {});
+
+        let filters = vec![filter];
+        let maps = vec![map];
+
+        let processing_module = FilterMapProcessingModule::<String>::new(filters, maps);
+
+        let receiver = sender.sender.subscribe();
+
+        let mut data_processing = DataReceiver::new(receiver, processing_module);
+
+        //2. module processor - simulate delay for 1s
+        let receiver2 = sender.sender.subscribe();
+
+        let mut data_processing2 = DataReceiver::new(
+            receiver2,
+            StringProcessingModule::new(2000, "processing module 2"),
+        );
+
+        //3. module processor - simulate delay for 1s
+        let receiver3 = sender.sender.subscribe();
+
+        let mut data_processing3 = DataReceiver::new(
+            receiver3,
+            StringProcessingModule::new(2300, "processing module 3"),
+        );
+
+        let handle = task::spawn(async move { data_processing.start_receiving().await });
+        let handle2 = task::spawn(async move { data_processing2.start_receiving().await });
+        let handle3 = task::spawn(async move { data_processing3.start_receiving().await });
+
+        pipe(stream, sender).await?;
+        handle.await??;
+        handle2.await??;
+        handle3.await??;
 
         Ok(())
     }
