@@ -77,6 +77,13 @@ where
         }
     }
 
+    fn new_from_sender(sender: &broadcast::Sender<T>, processing_module: U) -> Self {
+        Self {
+            receiver: sender.subscribe(),
+            processing_module,
+        }
+    }
+
     // async fn receiver_to_stream(&self) -> impl Stream<Item = T> {
     //     let stream = BroadcastStream::new(self.receiver);
 
@@ -220,7 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_multiple_receivers() -> Result<(), Box<dyn Error>> {
-        let mut stream = futures::stream::iter(vec![
+        let stream = futures::stream::iter(vec![
             Ok("this".to_owned()),
             Ok("is".to_owned()),
             Ok("a".to_owned()),
@@ -347,7 +354,7 @@ mod tests {
         // 1. module processor - without any delays
         let filter: Box<dyn Fn(&String) -> bool + Send + Sync> = Box::new(|value| {
             println!("filtering value: {}", value);
-            return value == "test";
+            value == "test"
         });
         let map: Box<dyn Fn(&mut String) + Send + Sync> = Box::new(|_| {});
 
@@ -356,23 +363,15 @@ mod tests {
 
         let processing_module = FilterMapProcessingModule::<String>::new(filters, maps);
 
-        let receiver = sender.sender.subscribe();
+        let mut data_processing = DataReceiver::new(sender.sender.subscribe(), processing_module);
 
-        let mut data_processing = DataReceiver::new(receiver, processing_module);
-
-        //2. module processor - simulate delay for 1s
-        let receiver2 = sender.sender.subscribe();
-
-        let mut data_processing2 = DataReceiver::new(
-            receiver2,
+        let mut data_processing2 = DataReceiver::new_from_sender(
+            &sender.sender,
             StringProcessingModule::new(2000, "processing module 2"),
         );
 
-        //3. module processor - simulate delay for 1s
-        let receiver3 = sender.sender.subscribe();
-
-        let mut data_processing3 = DataReceiver::new(
-            receiver3,
+        let mut data_processing3 = DataReceiver::new_from_sender(
+            &sender.sender,
             StringProcessingModule::new(2300, "processing module 3"),
         );
 
