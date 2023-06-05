@@ -1,11 +1,11 @@
 #![feature(async_fn_in_trait)]
 #![feature(return_position_impl_trait_in_trait)]
+#![allow(dead_code)]
 
 use anyhow::{anyhow, Result};
 use core::fmt::Debug;
 use futures_lite::Stream;
-use std::future::Future;
-use std::{error::Error, pin::Pin};
+use std::error::Error;
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 
@@ -108,16 +108,15 @@ trait ProcessingModule<T> {
     //  async fn process_stream(&self, stream: impl Stream<Item = T> + Unpin) -> impl Stream<Item = T>;
 }
 
+pub type DynamicFilterFn<T> = Box<dyn Fn(&T) -> bool + Send + Sync>;
+pub type DynamicMapFn<T> = Box<dyn Fn(&mut T) + Send + Sync>;
 struct FilterMapProcessingModule<T> {
-    filters: Vec<Box<dyn Fn(&T) -> bool + Send + Sync>>,
-    maps: Vec<Box<dyn Fn(&mut T) + Send + Sync>>,
+    filters: Vec<DynamicFilterFn<T>>,
+    maps: Vec<DynamicMapFn<T>>,
 }
 
 impl<T> FilterMapProcessingModule<T> {
-    fn new(
-        filters: Vec<Box<dyn Fn(&T) -> bool + Send + Sync>>,
-        maps: Vec<Box<dyn Fn(&mut T) + Send + Sync>>,
-    ) -> Self {
+    fn new(filters: Vec<DynamicFilterFn<T>>, maps: Vec<DynamicMapFn<T>>) -> Self {
         Self { filters, maps }
     }
 }
