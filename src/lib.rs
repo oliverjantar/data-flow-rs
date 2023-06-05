@@ -355,20 +355,20 @@ mod tests {
             println!("filtering value: {}", value);
             value == "test"
         });
+
         let map: Box<dyn Fn(&mut String) + Send + Sync> = Box::new(|_| {});
 
-        let filters = vec![filter];
-        let maps = vec![map];
-
-        let processing_module = FilterMapProcessingModule::<String>::new(filters, maps);
+        let processing_module = FilterMapProcessingModule::<String>::new(vec![filter], vec![map]);
 
         let mut data_processing = DataReceiver::new(sender.sender.subscribe(), processing_module);
 
+        // 2. module processor - simulate delay for 2s per value
         let mut data_processing2 = DataReceiver::new_from_sender(
             &sender.sender,
             StringProcessingModule::new(2000, "processing module 2"),
         );
 
+        // 3. module processor - simulate delay for 2.3s per value
         let mut data_processing3 = DataReceiver::new_from_sender(
             &sender.sender,
             StringProcessingModule::new(2300, "processing module 3"),
