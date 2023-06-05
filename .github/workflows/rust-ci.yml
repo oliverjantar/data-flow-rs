@@ -21,6 +21,7 @@ jobs:
             with:
               toolchain: nightly
               override: true # This overrides the default `stable` toolchain
+              components: clippy
 
           - name: Install cargo-audit
             run: cargo install cargo-audit
