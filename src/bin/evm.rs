@@ -1,12 +1,12 @@
-use data_flow_rs::streaming_helpers::{pipe, DataReceiver, DataSender, Outbound, ProcessingModule};
-use futures::Stream;
+use data_flow_rs::streaming_helpers::{pipe, DataSender};
 use std::error::Error;
 use tokio::task;
-use tokio_stream::StreamExt;
 
 #[tokio::main]
-pub async fn main() {
-    // let x =
+async fn main() -> Result<(), Box<dyn Error + 'static>> {
+    test_stream_data().await?;
+
+    Ok(())
 }
 
 async fn test_stream_data() -> Result<(), Box<dyn Error>> {
@@ -26,6 +26,8 @@ async fn test_stream_data() -> Result<(), Box<dyn Error>> {
         while let Ok(value) = receiver.recv().await {
             values.push(value);
         }
+
+        println!("values: {:?}", values);
 
         assert_eq!(values, vec!["this", "is", "a", "test"]);
     });
