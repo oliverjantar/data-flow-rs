@@ -47,6 +47,7 @@ impl<T> Outbound<T> for DataSender<T> {
         Ok(())
     }
 }
+//Todo: refactor this completely, data receiver shouldn't have processing module, instead it should just pipe the data to processing module
 
 pub struct DataReceiver<T, U>
 where
@@ -356,7 +357,7 @@ mod tests {
 
         let processing_module = FilterMapProcessingModule::<String>::new(vec![filter], vec![map]);
 
-        let mut data_processing = DataReceiver::new(sender.sender.subscribe(), processing_module);
+        let mut data_processing = DataReceiver::new_from_sender(&sender.sender, processing_module);
 
         // 2. module processor - simulate delay for 2s per value
         let mut data_processing2 = DataReceiver::new_from_sender(

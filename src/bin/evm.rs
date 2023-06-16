@@ -1,3 +1,6 @@
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
 use data_flow_rs::streaming_helpers::{pipe, DataSender};
 use std::error::Error;
 use tokio::task;
@@ -138,7 +141,7 @@ async fn start_output_writer_thread(
         .await
         .expect("Error while opening file.");
 
-    let handle = tokio::spawn(async move {
+    tokio::spawn(async move {
         while let Some(block) = receiver.recv().await {
             println!("writing block {} to file", block.number.unwrap());
             // if add(&mut file, &block).await.is_err() {
@@ -146,9 +149,7 @@ async fn start_output_writer_thread(
             //     break;
             // }
         }
-    });
-
-    handle
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -176,7 +177,7 @@ impl EvmBlock {
             transactions: block
                 .transactions
                 .iter()
-                .map(|tx| EvmTransaction::map_tx(tx))
+                .map(EvmTransaction::map_tx)
                 .collect(),
         };
         block
