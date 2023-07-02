@@ -12,25 +12,35 @@ async fn main() -> Result<(), Box<dyn Error + 'static>> {
 }
 
 async fn download_blocks_until_latest(
-    from_block: u64,
+    from_block: U64,
     provider: Provider<Http>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut latest_block = None;
+    let latest_block = provider.get_block_number().await.unwrap_or_else(|err| {
+        panic!("Couldn't get latest block. Error: {err}");
+    });
 
-    while latest_block.is_none() {
-        latest_block = get_latest_block(&provider).await;
+    let mut block_to_download = from_block;
+
+    while block_to_download <= latest_block {
+        let result = provider.get_block_with_txs(block_to_download).await;
+
+        match result {
+            Ok(Some(block)) => {
+                println!("Downloaded block {}", block_to_download);
+                block_to_download += U64::one();
+                todo!("process transactions");
+            }
+            Ok(None) => {
+                println!("Result for block {} is Ok(None)", block_to_download);
+                todo!("Handle this condition")
+            }
+            Err(e) => {
+                todo!("handle errors")
+            }
+        }
     }
 
     Ok(())
-}
-
-async fn get_latest_block(provider: &Provider<Http>) -> Option<Block<H256>> {
-    let latest_block = provider.get_block(BlockNumber::Latest).await;
-
-    if let Err(e) = latest_block {
-        panic!("Couldn't get latest block. Error: {e}");
-    }
-    latest_block.unwrap()
 }
 
 #[cfg(test)]
@@ -45,7 +55,9 @@ mod tests {
     async fn test_download_blocks_until_latest() {
         let provider =
             Provider::<Http>::try_from(RPC_URL).expect("Couldn't initialize evm data provider.");
-
-        download_blocks_until_latest(123, provider).await.unwrap();
+        //12965030
+        download_blocks_until_latest(U64([12965030]), provider)
+            .await
+            .unwrap();
     }
 }
