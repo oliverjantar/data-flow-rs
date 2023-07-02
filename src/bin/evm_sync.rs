@@ -1,8 +1,9 @@
 use std::error::Error;
 
-use ethers::providers::{Http, Middleware, Provider};
+use ethers::providers::{Http, Middleware, Provider, Ws};
 
-use ethers::types::{Address, Block, BlockNumber, Bytes, Transaction, H256, U256, U64};
+use ethers::types::U64;
+use futures::StreamExt;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + 'static>> {
@@ -11,6 +12,7 @@ async fn main() -> Result<(), Box<dyn Error + 'static>> {
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn download_blocks_until_latest(
     from_block: U64,
     provider: Provider<Http>,
@@ -26,7 +28,11 @@ async fn download_blocks_until_latest(
 
         match result {
             Ok(Some(block)) => {
-                println!("Downloaded block {}", block_to_download);
+                println!(
+                    "Downloaded block {}, tx count {}",
+                    block_to_download,
+                    block.transactions.len()
+                );
                 block_to_download += U64::one();
                 todo!("process transactions");
             }
@@ -35,12 +41,38 @@ async fn download_blocks_until_latest(
                 todo!("Handle this condition")
             }
             Err(e) => {
+                eprintln!(
+                    "Error while downloading block {}. Error: {}",
+                    block_to_download, e
+                );
                 todo!("handle errors")
             }
         }
     }
 
     Ok(())
+}
+
+#[allow(dead_code)]
+async fn subscribe_to_blocks(provider: Provider<Ws>) {
+    while let Some(block) = provider
+        .subscribe_blocks()
+        .await
+        .expect("Error while subscribing to blocks")
+        .next()
+        .await
+    {
+        println!(
+            "Downloaded block {}",
+            block.number.expect("No block number")
+        )
+        // if let Some(block_number) = block.number {
+        //     sender
+        //         .send(block_number)
+        //         .await
+        //         .expect("Error while sending block_number to channel.");
+        // }
+    }
 }
 
 #[cfg(test)]
@@ -51,13 +83,24 @@ mod tests {
     const RPC_URL_WS: &str = "wss://mainnet.infura.io/ws/v3/d27480148c2646b6a42d1a4c2f786449";
     const RPC_URL: &str = "https://eth.llamarpc.com";
 
+    #[ignore]
     #[tokio::test]
     async fn test_download_blocks_until_latest() {
         let provider =
-            Provider::<Http>::try_from(RPC_URL).expect("Couldn't initialize evm data provider.");
+            Provider::<Http>::try_from(RPC_URL).expect("Couldn't instantiate http provider");
         //12965030
         download_blocks_until_latest(U64([12965030]), provider)
             .await
             .unwrap();
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_subscribe_to_blocks() {
+        let provider = Provider::<Ws>::connect(RPC_URL_WS)
+            .await
+            .expect("Couldn't instantiated ws provider");
+
+        subscribe_to_blocks(provider).await;
     }
 }
