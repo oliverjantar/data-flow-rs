@@ -9,52 +9,118 @@ use tokio::sync::broadcast;
 async fn main() -> Result<(), Box<dyn Error + 'static>> {
     // run_evm_pipeline().await?;
 
+    let mut from_block;
+    {
+        let provider =
+            Provider::<Http>::try_from(RPC_URL).expect("Couldn't instantiate http provider");
+
+        from_block = provider
+            .get_block_number()
+            .await
+            .unwrap_or_else(|err| panic!("Couldn't get latest block. Error: {err}"))
+            .as_u64();
+    }
+
+    from_block -= 10;
+
+    switch_http_to_ws(from_block).await?;
+
+    Ok(())
+}
+
+const BUFFER_SIZE: usize = 10;
+const RPC_URL_WS: &str = "wss://mainnet.infura.io/ws/v3/d27480148c2646b6a42d1a4c2f786449";
+const RPC_URL: &str = "https://eth.llamarpc.com";
+
+async fn switch_http_to_ws(from_block: u64) -> Result<(), Box<dyn Error>> {
+    let provider = Provider::<Http>::try_from(RPC_URL).expect("Couldn't instantiate http provider");
+    let (sender, mut receiver) = tokio::sync::broadcast::channel::<Block<Transaction>>(BUFFER_SIZE);
+    let (sender_new_block, receiver_new_block) = tokio::sync::broadcast::channel(BUFFER_SIZE);
+
+    let latest_block = provider
+        .get_block_number()
+        .await
+        .unwrap_or_else(|err| panic!("Couldn't get latest block. Error: {err}"))
+        .as_u64();
+
+    // let sender_blocks = sender);
+
+    let processing_handle = tokio::spawn(async move {
+        while let Ok(block) = receiver.recv().await {
+            let number = block.number.expect("No block number").as_u64();
+            println!(
+                "PROCESSING Block {} with {} transactions",
+                number,
+                block.transactions.len()
+            );
+        }
+    });
+
+    download_blocks_from_to(&provider, &sender, from_block, latest_block).await?;
+
+    let provider_ws = Provider::<Ws>::connect(RPC_URL_WS)
+        .await
+        .expect("Couldn't connect to ws client");
+
+    let mut receiver_ws = sender_new_block.subscribe();
+
+    let handle = tokio::spawn(async move {
+        subscribe_to_blocks(provider_ws, sender_new_block)
+            .await
+            .unwrap();
+    });
+
+    let first_block_ws = receiver_ws.recv().await.unwrap();
+    drop(receiver_ws);
+
+    download_blocks_from_to(&provider, &sender, latest_block + 1, first_block_ws - 1).await?;
+
+    download_and_broadcast_block(provider, receiver_new_block, sender).await?;
+
+    handle.await?;
+    processing_handle.await?;
+
     Ok(())
 }
 
 #[allow(dead_code)]
-async fn download_blocks_until_latest(
+async fn download_blocks_from_to(
     provider: &Provider<Http>,
     sender: &broadcast::Sender<Block<Transaction>>,
-    from_block: u64,
+    mut from_block: u64,
+    to_block: u64,
 ) -> Result<(), Box<dyn Error>> {
-    let latest_block = provider.get_block_number().await.unwrap_or_else(|err| {
-        panic!("Couldn't get latest block. Error: {err}");
-    });
-
-    let mut block_to_download = from_block;
-
-    while U64::from(block_to_download) <= latest_block {
+    println!("Downloading blocks from {from_block} to {to_block}");
+    while from_block <= to_block {
         // download_and_broadcast_block(provider, sender, block_to_download).await?;
         //here should be error handling, for now just panic
         //error while downloading block - try the download again
         //error while broadcasting block to receivers - break
         //get_block results to Ok(None) - no block with that number
 
-        let result = provider.get_block_with_txs(block_to_download).await?;
+        let result = provider.get_block_with_txs(from_block).await?;
 
         match result {
             Some(block) => {
                 println!(
                     "Downloaded block {}, tx count {}",
-                    block_to_download,
+                    from_block,
                     block.transactions.len()
                 );
 
                 let receiver_count = sender.send(block)?;
-                println!(
-                    "Block {} sent to {} receivers",
-                    block_to_download, receiver_count
-                );
+                println!("Block {} sent to {} receivers", from_block, receiver_count);
             }
             None => {
-                println!("Result for block {} is Ok(None)", block_to_download);
+                println!("Result for block {} is Ok(None)", from_block);
                 todo!("Handle this condition")
             }
         }
 
-        block_to_download += 1;
+        from_block += 1;
     }
+
+    println!("Finished downloading blocks.");
 
     Ok(())
 }
@@ -62,15 +128,17 @@ async fn download_blocks_until_latest(
 #[allow(dead_code)]
 async fn subscribe_to_blocks(
     provider: Provider<Ws>,
-    sender: tokio::sync::mpsc::Sender<u64>,
+    sender: tokio::sync::broadcast::Sender<u64>,
 ) -> Result<(), Box<dyn Error>> {
     let mut stream = provider.subscribe_blocks().await?;
 
     while let Some(block) = stream.next().await {
-        println!("New block number {}", block.number.unwrap_or(U64::from(0)));
+        println!("WS: Block number {}", block.number.unwrap_or(U64::from(0)));
 
         if let Some(block_number) = block.number {
-            sender.send(block_number.as_u64()).await?;
+            sender
+                .send(block_number.as_u64())
+                .expect("Error sending block number to sender");
         }
     }
     Ok(())
@@ -79,25 +147,23 @@ async fn subscribe_to_blocks(
 #[allow(dead_code)]
 async fn download_and_broadcast_block(
     provider: Provider<Http>,
-    mut receiver: tokio::sync::mpsc::Receiver<u64>,
+    mut receiver: tokio::sync::broadcast::Receiver<u64>,
     sender: tokio::sync::broadcast::Sender<Block<Transaction>>,
 ) -> Result<(), Box<dyn Error>> {
-    while let Some(block_number) = receiver.recv().await {
+    while let Ok(block_number) = receiver.recv().await {
         let result = provider.get_block_with_txs(block_number).await?;
 
         match result {
             Some(block) => {
-                println!(
-                    "Downloaded block {}, tx count {}",
-                    block_number,
-                    block.transactions.len()
-                );
+                // println!(
+                //     "Downloaded full block {}, tx count {}",
+                //     block_number,
+                //     block.transactions.len()
+                // );
 
-                let receiver_count = sender.send(block)?;
-                println!(
-                    "Block {} sent to {} receivers",
-                    block_number, receiver_count
-                );
+                if let Err(error) = sender.send(block) {
+                    println!("error while sending blocks to receivers {}", error);
+                }
             }
             None => {
                 println!("Result for block {} is Ok(None)", block_number);
@@ -122,8 +188,8 @@ mod tests {
             Provider::<Http>::try_from(RPC_URL).expect("Couldn't instantiate http provider");
 
         let (sender, _receiver) = broadcast::channel(10);
-        //12965030
-        download_blocks_until_latest(&provider, &sender, 12965030)
+        let from = 12965030;
+        download_blocks_from_to(&provider, &sender, from, from + 5)
             .await
             .unwrap();
     }
@@ -135,11 +201,11 @@ mod tests {
             .await
             .expect("Couldn't instantiated ws provider");
 
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(10);
 
         let handle = tokio::spawn(async move {
             let mut x = 0;
-            while let Some(block_number) = receiver.recv().await {
+            while let Ok(block_number) = receiver.recv().await {
                 println!("block number received: {}", block_number);
                 x += 1;
                 if x >= 5 {
@@ -166,7 +232,7 @@ mod tests {
             .await
             .expect("Couldn't instantiated ws provider");
 
-        let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(10);
 
         let handle = tokio::spawn(async move {
             match subscribe_to_blocks(provider, sender).await {
@@ -176,7 +242,7 @@ mod tests {
         });
 
         let mut x = 0;
-        while let Some(block_number) = receiver.recv().await {
+        while let Ok(block_number) = receiver.recv().await {
             println!("block number received: {}", block_number);
             x += 1;
             if x >= 1 {
