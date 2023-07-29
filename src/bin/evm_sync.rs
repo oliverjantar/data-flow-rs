@@ -1,3 +1,4 @@
+use colored::*;
 use ethers::core::types::Block;
 use ethers::providers::{Http, Middleware, Provider, Ws};
 use ethers::types::{Transaction, U64};
@@ -34,7 +35,11 @@ const RPC_URL: &str = "https://eth.llamarpc.com";
 
 async fn switch_http_to_ws(from_block: u64) -> Result<(), Box<dyn Error>> {
     let provider = Provider::<Http>::try_from(RPC_URL).expect("Couldn't instantiate http provider");
+
+    //block download and processing
     let (sender, mut receiver) = tokio::sync::broadcast::channel::<Block<Transaction>>(BUFFER_SIZE);
+
+    //channel for ws
     let (sender_new_block, receiver_new_block) = tokio::sync::broadcast::channel(BUFFER_SIZE);
 
     let latest_block = provider
@@ -43,16 +48,17 @@ async fn switch_http_to_ws(from_block: u64) -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|err| panic!("Couldn't get latest block. Error: {err}"))
         .as_u64();
 
-    // let sender_blocks = sender);
-
     let processing_handle = tokio::spawn(async move {
         while let Ok(block) = receiver.recv().await {
             let number = block.number.expect("No block number").as_u64();
-            println!(
+            let msg = format!(
                 "PROCESSING Block {} with {} transactions",
                 number,
                 block.transactions.len()
-            );
+            )
+            .green();
+
+            println!("{msg}");
         }
     });
 
@@ -133,7 +139,10 @@ async fn subscribe_to_blocks(
     let mut stream = provider.subscribe_blocks().await?;
 
     while let Some(block) = stream.next().await {
-        println!("WS: Block number {}", block.number.unwrap_or(U64::from(0)));
+        let msg = format!("WS: Block number {}", block.number.unwrap_or(U64::from(0)))
+            .yellow()
+            .on_black();
+        println!("{msg}");
 
         if let Some(block_number) = block.number {
             sender
