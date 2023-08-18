@@ -4,6 +4,6 @@
 
 Simple download pipeline for EVM chains.
 
-Old blocks are firstly downloaded with http provider and then switched to web socket for subscribing for new blocks.
+Firstly, history of blocks is downloaded using http provider and simple get_blocks one by one. Once blocks are synced to tip, download is switched to a web socket to subscribe for new blocks.
 
-Full blocks are sent to channel for further processing.
+Full blocks with transactions are sent to channel for further processing.
