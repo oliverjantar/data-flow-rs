@@ -1,3 +1,20 @@
+/*
+
+
+
+
+
+
+
+NOT USED, old approach. New download pipeline is in evm_sync.rs
+
+
+
+
+
+
+
+*/
 #![allow(unused_imports)]
 #![allow(unused_variables)]
 #![allow(unused_mut)]

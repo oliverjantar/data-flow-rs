@@ -1,4 +1,5 @@
 use colored::*;
+use dotenv::dotenv;
 use ethers::core::types::Block;
 use ethers::providers::{Http, Middleware, Provider, Ws};
 use ethers::types::{Transaction, U64};
@@ -8,9 +9,10 @@ use tokio::sync::broadcast;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + 'static>> {
-    // run_evm_pipeline().await?;
+    dotenv().ok();
 
     let mut from_block;
+
     {
         let provider =
             Provider::<Http>::try_from(RPC_URL).expect("Couldn't instantiate http provider");
@@ -30,8 +32,8 @@ async fn main() -> Result<(), Box<dyn Error + 'static>> {
 }
 
 const BUFFER_SIZE: usize = 10;
-const RPC_URL_WS: &str = "wss://mainnet.infura.io/ws/v3/d27480148c2646b6a42d1a4c2f786449";
-const RPC_URL: &str = "https://eth.llamarpc.com";
+const RPC_URL_WS: &str = "";
+const RPC_URL: &str = "";
 
 async fn switch_http_to_ws(from_block: u64) -> Result<(), Box<dyn Error>> {
     let provider = Provider::<Http>::try_from(RPC_URL).expect("Couldn't instantiate http provider");
@@ -187,8 +189,8 @@ mod tests {
 
     use super::*;
 
-    const RPC_URL_WS: &str = "wss://mainnet.infura.io/ws/v3/d27480148c2646b6a42d1a4c2f786449";
-    const RPC_URL: &str = "https://eth.llamarpc.com";
+    const RPC_URL_WS: &str = "";
+    const RPC_URL: &str = "";
 
     #[ignore]
     #[tokio::test]
