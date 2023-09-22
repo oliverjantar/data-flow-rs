@@ -11,14 +11,21 @@ pub struct Downloader {
     ws_url: String,
     http_url: String,
     block_buffer_size: usize,
+    sender: broadcast::Sender<Block<Transaction>>,
 }
 
 impl Downloader {
-    pub fn new(ws_url: String, http_url: String, block_buffer_size: usize) -> Self {
+    pub fn new(
+        ws_url: String,
+        http_url: String,
+        block_buffer_size: usize,
+        sender: broadcast::Sender<Block<Transaction>>,
+    ) -> Self {
         Self {
             ws_url,
             http_url,
             block_buffer_size,
+            sender,
         }
     }
 
@@ -28,10 +35,6 @@ impl Downloader {
     ) -> Result<(), Box<dyn Error>> {
         let provider =
             Provider::<Http>::try_from(self.http_url).expect("Couldn't instantiate http provider");
-
-        //block download and processing
-        let (sender, mut receiver) =
-            tokio::sync::broadcast::channel::<Block<Transaction>>(self.block_buffer_size);
 
         //channel for ws
         let (sender_new_block, receiver_new_block) =
@@ -43,21 +46,7 @@ impl Downloader {
             .unwrap_or_else(|err| panic!("Couldn't get latest block. Error: {err}"))
             .as_u64();
 
-        let processing_handle = tokio::spawn(async move {
-            while let Ok(block) = receiver.recv().await {
-                let number = block.number.expect("No block number").as_u64();
-                let msg = format!(
-                    "PROCESSING Block {} with {} transactions",
-                    number,
-                    block.transactions.len()
-                )
-                .green();
-
-                println!("{msg}");
-            }
-        });
-
-        Self::download_blocks_from_to(&provider, &sender, from_block, latest_block).await?;
+        Self::download_blocks_from_to(&provider, &self.sender, from_block, latest_block).await?;
 
         let provider_ws = Provider::<Ws>::connect(self.ws_url)
             .await
@@ -74,13 +63,17 @@ impl Downloader {
         let first_block_ws = receiver_ws.recv().await.unwrap();
         drop(receiver_ws);
 
-        Self::download_blocks_from_to(&provider, &sender, latest_block + 1, first_block_ws - 1)
-            .await?;
+        Self::download_blocks_from_to(
+            &provider,
+            &self.sender,
+            latest_block + 1,
+            first_block_ws - 1,
+        )
+        .await?;
 
-        Self::download_and_broadcast_block(provider, receiver_new_block, sender).await?;
+        Self::download_and_broadcast_block(provider, receiver_new_block, self.sender).await?;
 
         handle.await?;
-        processing_handle.await?;
 
         Ok(())
     }

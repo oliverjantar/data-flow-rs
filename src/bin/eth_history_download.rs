@@ -23,15 +23,13 @@ async fn main() -> Result<(), Box<dyn Error + 'static>> {
 
     from_block -= 10;
 
-    let downloader = data_flow_rs::startup::run(
+    data_flow_rs::startup::run(
         configuration.application.node_url_ws.to_owned(),
         configuration.application.node_url_http.to_owned(),
         configuration.application.block_buffer_size,
-    )?;
-
-    downloader
-        .download_history_and_subscribe_for_new_blocks(from_block)
-        .await?;
+        from_block,
+    )
+    .await?;
 
     Ok(())
 }
