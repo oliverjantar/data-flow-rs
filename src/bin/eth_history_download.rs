@@ -1,13 +1,18 @@
+use data_flow_rs::configuration::get_configuration;
+use dotenv::dotenv;
 use ethers::providers::{Http, Middleware, Provider};
-
 use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + 'static>> {
+    dotenv().ok();
+    let configuration = get_configuration().expect("Failed to get configuration.");
+
     let mut from_block;
 
     {
-        let provider = Provider::<Http>::try_from("").expect("Couldn't instantiate http provider");
+        let provider = Provider::<Http>::try_from(configuration.application.node_url_http.clone())
+            .expect("Couldn't instantiate http provider");
 
         from_block = provider
             .get_block_number()
@@ -18,7 +23,12 @@ async fn main() -> Result<(), Box<dyn Error + 'static>> {
 
     from_block -= 10;
 
-    let downloader = data_flow_rs::startup::run("".to_owned(), "".to_owned(), 1)?;
+    let downloader = data_flow_rs::startup::run(
+        configuration.application.node_url_ws.to_owned(),
+        configuration.application.node_url_http.to_owned(),
+        configuration.application.block_buffer_size,
+    )?;
+
     downloader
         .download_history_and_subscribe_for_new_blocks(from_block)
         .await?;

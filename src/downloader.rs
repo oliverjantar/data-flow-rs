@@ -10,15 +10,15 @@ use tokio_stream::StreamExt;
 pub struct Downloader {
     ws_url: String,
     http_url: String,
-    buffer_size: usize,
+    block_buffer_size: usize,
 }
 
 impl Downloader {
-    pub fn new(ws_url: String, http_url: String, buffer_size: usize) -> Self {
+    pub fn new(ws_url: String, http_url: String, block_buffer_size: usize) -> Self {
         Self {
             ws_url,
             http_url,
-            buffer_size,
+            block_buffer_size,
         }
     }
 
@@ -31,11 +31,11 @@ impl Downloader {
 
         //block download and processing
         let (sender, mut receiver) =
-            tokio::sync::broadcast::channel::<Block<Transaction>>(self.buffer_size);
+            tokio::sync::broadcast::channel::<Block<Transaction>>(self.block_buffer_size);
 
         //channel for ws
         let (sender_new_block, receiver_new_block) =
-            tokio::sync::broadcast::channel(self.buffer_size);
+            tokio::sync::broadcast::channel(self.block_buffer_size);
 
         let latest_block = provider
             .get_block_number()
@@ -195,7 +195,7 @@ mod tests {
 
         let (sender, _receiver) = broadcast::channel(10);
         let from = 12965030;
-        download_blocks_from_to(&provider, &sender, from, from + 5)
+        Downloader::download_blocks_from_to(&provider, &sender, from, from + 5)
             .await
             .unwrap();
     }
@@ -220,7 +220,7 @@ mod tests {
             }
         });
 
-        let result = subscribe_to_blocks(provider, sender).await;
+        let result = Downloader::subscribe_to_blocks(provider, sender).await;
         if let Err(e) = result {
             //channel closed
             println!("{}", e);
@@ -241,7 +241,7 @@ mod tests {
         let (sender, mut receiver) = tokio::sync::broadcast::channel(10);
 
         let handle = tokio::spawn(async move {
-            match subscribe_to_blocks(provider, sender).await {
+            match Downloader::subscribe_to_blocks(provider, sender).await {
                 Ok(()) => {}
                 Err(e) => println!("error while subscribing: {}", e),
             }
