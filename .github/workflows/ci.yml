@@ -19,8 +19,8 @@ jobs:
           - name: Set up Rust
             uses: actions-rs/toolchain@v1
             with:
-              toolchain: nightly
-              override: true # This overrides the default `stable` toolchain
+              # toolchain: nightly
+              # override: true # This overrides the default `stable` toolchain
               components: clippy
 
           - name: Install cargo-audit
